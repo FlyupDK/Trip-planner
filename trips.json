@@ -1,6 +1,52 @@
 {
  "app": "trip-planner",
  "v": 1,
- "trips": [],
+ "trips": [
+  {
+   "id": "4nhzdbhh0e7a",
+   "title": "가족과 신혼 여행",
+   "dest": "스페인",
+   "start": "2027-02-11",
+   "end": "2027-02-20",
+   "mode": "line",
+   "center": {
+    "lat": 39.3260685,
+    "lng": -4.8379791
+   },
+   "days": [
+    {
+     "items": []
+    },
+    {
+     "items": []
+    },
+    {
+     "items": []
+    },
+    {
+     "items": []
+    },
+    {
+     "items": []
+    },
+    {
+     "items": []
+    },
+    {
+     "items": []
+    },
+    {
+     "items": []
+    },
+    {
+     "items": []
+    },
+    {
+     "items": []
+    }
+   ],
+   "updatedAt": 1795583426273
+  }
+ ],
  "deleted": []
 }
