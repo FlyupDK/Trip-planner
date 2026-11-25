@@ -764,7 +764,7 @@ function searchSheet(){
    - OpenStreetMap: 종류, 음식 종류, 영업시간, 전화, 웹사이트 (Nominatim 상세조회 또는 Overpass 주변 검색)
    - 위키백과(한국어 우선, 없으면 영어): 설명 글과 사진 (위키데이터 연결 → 없으면 주변 위키 문서 중 이름이 비슷한 것)
    - 식당처럼 위키 설명이 없는 곳은 구글 지도 링크로 리뷰·사진 확인 */
-const IKEY='tripPlanner.info.v1';
+const IKEY='tripPlanner.info.v2';try{localStorage.removeItem('tripPlanner.info.v1')}catch(e){}
 let infoCache={};try{infoCache=JSON.parse(localStorage.getItem(IKEY))||{}}catch(e){}
 const KIND_KO={restaurant:'식당',cafe:'카페',bar:'바',pub:'펍',fast_food:'패스트푸드',ice_cream:'아이스크림',food_court:'푸드코트',biergarten:'비어가든',
   place_of_worship:'종교 시설',museum:'박물관',attraction:'관광지',viewpoint:'전망대',hotel:'호텔',hostel:'호스텔',guest_house:'게스트하우스',apartment:'숙소',motel:'모텔',
@@ -781,6 +781,7 @@ const DAY_KO={Mo:'월',Tu:'화',We:'수',Th:'목',Fr:'금',Sa:'토',Su:'일',PH:
 const MON_KO={Jan:1,Feb:2,Mar:3,Apr:4,May:5,Jun:6,Jul:7,Aug:8,Sep:9,Oct:10,Nov:11,Dec:12};
 const hoursKo=h=>h.replace(/\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\b( \d{1,2}\b)?/g,(m,mo,d)=>MON_KO[mo]+'월'+(d?d+'일':'')).replace(/\b(Mo|Tu|We|Th|Fr|Sa|Su|PH)\b/g,m=>DAY_KO[m]).replace(/\boff\b|\bclosed\b/gi,'휴무').replace(/24\/7/,'24시간').replace(/;\s*/g,'\n');
 const nameBi=t=>{const n=String(t||'').replace(/\(.*?\)/g,'').replace(/[\s·,.'"\-]/g,'').toLowerCase(),o=new Set();for(let i=0;i<n.length-1;i++)o.add(n.slice(i,i+2));return o};
+const nameDice=(a,b)=>{const A=nameBi(a),B=nameBi(b);if(!A.size||!B.size)return 0;let c=0;A.forEach(g=>{if(B.has(g))c++});return 2*c/(A.size+B.size)};
 const nameSim=(a,b)=>{const A=nameBi(a),B=nameBi(b);if(!A.size||!B.size)return 0;let c=0;A.forEach(g=>{if(B.has(g))c++});return c/Math.min(A.size,B.size)};
 
 async function osmDetails(it){
@@ -793,12 +794,13 @@ async function osmDetails(it){
       if(j)return{tags:{...(j.extratags||{}),...(j.namedetails||{}),[j.category]:j.type},addr:shortAddr(j.display_name),kind:j.type};
     }catch(e){}
   }
-  const pick=(arr,getNames)=>{let best=null,bs=0;arr.forEach(e=>{const sc=Math.max(...getNames(e).map(n=>nameSim(it.name,n)));if(sc>bs){bs=sc;best=e}});return bs>=0.5?best:null};
-  // 2) 이름으로 아주 좁은 범위(약 ±200m)에서 Nominatim 검색 (빠르고 정확)
+  const parts=nameParts(it.name);
+  const pick=(arr,getNames)=>{let best=null,bs=0;arr.forEach(e=>{const sc=Math.max(0,...getNames(e).flatMap(n=>[it.name,...parts].map(m=>nameSim(m,n))));if(sc>bs){bs=sc;best=e}});return bs>=0.5?best:null};
+  // 2) 이름(여러 곳이 섞인 이름이면 첫 번째 이름)으로 좁은 범위(약 ±600m)에서 Nominatim 검색
   try{
-    const d=0.002,box=`${it.lng-d},${it.lat+d},${it.lng+d},${it.lat-d}`;
+    const d=0.006,box=`${it.lng-d},${it.lat+d},${it.lng+d},${it.lat-d}`;
     const wait=lastNomi+1100-Date.now();if(wait>0)await sleep(wait);lastNomi=Date.now();
-    const r=await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&extratags=1&namedetails=1&accept-language=ko&limit=5&bounded=1&viewbox=${box}&q=${encodeURIComponent(it.name)}`);
+    const r=await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&extratags=1&namedetails=1&accept-language=ko&limit=5&bounded=1&viewbox=${box}&q=${encodeURIComponent(parts[0]||it.name)}`);
     const arr=await r.json();
     const j=pick(arr,e=>[e.name,...Object.values(e.namedetails||{})]);
     if(j){it.osm=it.osm||osmId(j.osm_type,j.osm_id);return{tags:{...(j.extratags||{}),...(j.namedetails||{}),[j.category]:j.type},addr:shortAddr(j.display_name),kind:j.type}}
@@ -820,33 +822,86 @@ async function wikiSummary(lang,title){
   if(j.type==='disambiguation'||!j.extract)return null;
   return{text:j.extract,img:j.thumbnail?.source||j.originalimage?.source,url:j.content_urls?.desktop?.page,lang,title:j.title,desc:j.description};
 }
-async function wikiFor(it,tags){
+/* '세비야 대성당 & 히랄다 탑' → ['세비야 대성당','히랄다 탑'] */
+const nameParts=n=>String(n||'').split(/\s*(?:&|＆|\+|\/|,|·|\||\s및\s|\s그리고\s)\s*/).map(x=>x.replace(/\(.*?\)/g,'').trim()).filter(x=>x.length>=2).slice(0,3);
+async function wikidataCoord(qid){
   try{
-    if(it.wiki){const w=await wikiSummary('ko',it.wiki);if(w)return w}
-    const qid=tags&&tags.wikidata;
-    if(qid){
-      const j=await(await fetch(`https://www.wikidata.org/w/api.php?action=wbgetentities&format=json&origin=*&props=sitelinks&sitefilter=kowiki|enwiki&ids=${qid}`)).json();
-      const sl=j.entities?.[qid]?.sitelinks||{};
-      if(sl.kowiki){const w=await wikiSummary('ko',sl.kowiki.title);if(w)return w}
-      if(sl.enwiki){const w=await wikiSummary('en',sl.enwiki.title);if(w)return w}
+    const c=await(await fetch(`https://www.wikidata.org/w/api.php?action=wbgetclaims&format=json&origin=*&property=P625&entity=${qid}`)).json();
+    const v=c.claims?.P625?.[0]?.mainsnak?.datavalue?.value;return v?{lat:v.latitude,lng:v.longitude}:null;
+  }catch(e){return null}
+}
+async function summaryFromQid(qid){
+  const j=await(await fetch(`https://www.wikidata.org/w/api.php?action=wbgetentities&format=json&origin=*&props=sitelinks&sitefilter=kowiki|enwiki&ids=${qid}`)).json();
+  const sl=j.entities?.[qid]?.sitelinks||{};
+  if(sl.kowiki){const w=await wikiSummary('ko',sl.kowiki.title);if(w)return w}
+  if(sl.enwiki){const w=await wikiSummary('en',sl.enwiki.title);if(w)return w}
+  return null;
+}
+/* 이름으로 위키백과 찾기: 장소 위치에서 30km 안에 좌표가 있는 문서만 채택
+   (표기가 달라도 찾도록: '알함브라 궁전' → '알람브라', '히랄다 탑' → '히랄다') */
+const GENERIC=/\s*(대성당|성당|궁전|궁|탑|타워|광장|공원|박물관|미술관|성|시장|거리|다리|교회|사원|정원|해변|전망대)$/;
+async function wikiByName(part,it){
+  const near=co=>!!co&&hav(co,it)<30000;
+  const short=part.replace(GENERIC,'').trim();
+  // ① 한국어 위키백과 검색 (본문 검색이라 표기가 조금 달라도 찾음) → 가까운 문서 중 이름이 가장 비슷한 것
+  try{
+    const qs=[...new Set([part,short].filter(x=>x.length>=2))];
+    const lists=await Promise.all(qs.map(q=>fetch('https://ko.wikipedia.org/w/api.php?action=query&format=json&origin=*&generator=search&gsrlimit=8&prop=pageprops&ppprop=wikibase_item&gsrsearch='+encodeURIComponent(q)).then(r=>r.json()).then(j=>Object.values(j.query?.pages||{}).sort((a,b)=>a.index-b.index)).catch(()=>[])));
+    const seenT=new Set(),cands=[];
+    lists.flat().forEach(pg=>{if(seenT.has(pg.title))return;seenT.add(pg.title);
+      const full=nameDice(part,pg.title),sim=Math.max(full,short&&short!==part?nameDice(short,pg.title)*0.9:0);
+      // '세비야 대성당'에 '세비야'(도시)처럼 이름의 일부만 같은 문서는 전체 이름과 아주 비슷할 때만
+      const T=nameBi(pg.title),P=nameBi(part),sub=T.size<P.size&&[...T].every(g=>P.has(g));
+      if((sub?full>=0.7:sim>=0.28)&&pg.pageprops?.wikibase_item)cands.push({pg,sim})});
+    cands.sort((a,b)=>b.sim-a.sim);
+    const withCo=await Promise.all(cands.slice(0,6).map(async c=>({...c,co:await wikidataCoord(c.pg.pageprops.wikibase_item)})));
+    for(const c of withCo){if(!near(c.co))continue;const w=await wikiSummary('ko',c.pg.title);if(w)return{...w,...c.co}}
+  }catch(e){}
+  // ② 위키데이터의 한국어 이름·별칭으로 찾기 → 한국어 문서, 없으면 영어 문서
+  for(const q of [...new Set([part,short].filter(x=>x.length>=2))]){
+    try{
+      const j=await(await fetch(`https://www.wikidata.org/w/api.php?action=wbsearchentities&format=json&origin=*&language=ko&uselang=ko&type=item&limit=7&search=${encodeURIComponent(q)}`)).json();
+      for(const e of j.search||[]){
+        const co=await wikidataCoord(e.id);if(!near(co))continue;
+        const w=await summaryFromQid(e.id);if(w)return{...w,...co};
+      }
+    }catch(e){}
+  }
+  return null;
+}
+/* 설명 찾기: 여러 곳이 섞인 이름이면 각각 찾아서 최대 3개 */
+async function wikiFor(it,tags){
+  const out=[],seen=new Set();
+  const push=w=>{if(w&&!seen.has(w.lang+w.title)){seen.add(w.lang+w.title);out.push(w)}};
+  try{
+    if(it.wiki)push(await wikiSummary('ko',it.wiki));
+    if(!out.length&&tags&&tags.wikidata)push(await summaryFromQid(tags.wikidata).catch(()=>null));
+    if(!out.length&&tags&&tags.wikipedia){const m=tags.wikipedia.match(/^([a-z-]+):(.+)$/);if(m)push(await wikiSummary(m[1],m[2]))}
+    const parts=nameParts(it.name);
+    for(const part of parts){
+      if(out.some(w=>nameSim(part,w.title)>=0.6))continue; // 이미 찾은 문서
+      push(await wikiByName(part,it));
     }
-    if(tags&&tags.wikipedia){const m=tags.wikipedia.match(/^([a-z-]+):(.+)$/);if(m){const w=await wikiSummary(m[1],m[2]);if(w)return w}}
-    // 주변 200m 안의 한국어 → 영어 위키 문서 중 이름이 비슷한 것
-    const names=[it.name,tags&&tags['name:ko'],tags&&tags['name:en'],tags&&tags.name].filter(Boolean);
-    for(const lang of ['ko','en']){
-      const g=await(await fetch(`https://${lang}.wikipedia.org/w/api.php?action=query&list=geosearch&format=json&origin=*&gsradius=200&gslimit=15&gscoord=${it.lat}|${it.lng}`)).json();
-      let best=null,bs=0;
-      (g.query?.geosearch||[]).forEach(p=>{const sc=Math.max(...names.map(n=>nameSim(n,p.title)));if(sc>bs){bs=sc;best=p}});
-      if(best&&bs>=0.5){const w=await wikiSummary(lang,best.title);if(w)return w}
+    if(!out.length&&parts.join('')!==String(it.name).replace(/\s/g,''))push(await wikiByName(it.name,it));
+    if(!out.length){
+      // 마지막: 주변 1km 안의 위키 문서 중 이름이 비슷한 것
+      const names=[it.name,...parts,tags&&tags['name:ko'],tags&&tags['name:en'],tags&&tags.name].filter(Boolean);
+      for(const lang of ['ko','en']){
+        const g=await(await fetch(`https://${lang}.wikipedia.org/w/api.php?action=query&list=geosearch&format=json&origin=*&gsradius=1000&gslimit=30&gscoord=${it.lat}|${it.lng}`)).json();
+        let best=null,bs=0;
+        (g.query?.geosearch||[]).forEach(p=>{const sc=Math.max(...names.map(n=>nameSim(n,p.title)));if(sc>bs){bs=sc;best=p}});
+        if(best&&bs>=0.5){const w=await wikiSummary(lang,best.title);if(w){push({...w,lat:best.lat,lng:best.lon});break}}
+      }
     }
   }catch(e){}
-  return null;
+  return out;
 }
 async function loadInfo(it){
   const key=`${it.name}|${it.lat.toFixed(5)},${it.lng.toFixed(5)}`;
   const c=infoCache[key];if(c&&Date.now()-c.t<14*864e5)return c;
-  const osm=await osmDetails(it);
-  const wiki=await wikiFor(it,osm&&osm.tags);
+  // OSM 정보와 이름 기반 위키 검색을 동시에 진행
+  const [osm,wn]=await Promise.all([osmDetails(it).catch(()=>null),wikiFor(it,null)]);
+  const wiki=wn.length||!(osm&&osm.tags&&(osm.tags.wikidata||osm.tags.wikipedia))?wn:await wikiFor(it,osm.tags);
   const res={t:Date.now(),osm,wiki};
   infoCache[key]=res;
   try{const ks=Object.keys(infoCache);if(ks.length>300)delete infoCache[ks[0]];localStorage.setItem(IKEY,JSON.stringify(infoCache))}catch(e){}
@@ -854,6 +909,7 @@ async function loadInfo(it){
 }
 function showInfo(it,di){
   const t=S.trip,cat=catOf(it.cat),j=t.days[di].items.indexOf(it);
+  const sq=encodeURIComponent((it.name+' '+(t.dest&&!it.name.includes(t.dest)?t.dest:'')).trim());
   const gq=it.gid?encodeURIComponent(it.name)+'&query_place_id='+it.gid:encodeURIComponent(it.name)+'%20'+it.lat+','+it.lng;
   const close=modal(it.name,`<div id="infoBody">
       <div class="info-sub">${cat[1]} ${cat[2]}</div>
@@ -863,20 +919,28 @@ function showInfo(it,di){
     <div class="ext-links" style="margin-top:8px">
       <a href="https://www.google.com/maps/search/?api=1&query=${gq}" target="_blank" rel="noopener">⭐ 구글 지도 (리뷰·사진)</a>
       <a href="https://www.google.com/maps/dir/?api=1&destination=${it.lat},${it.lng}" target="_blank" rel="noopener">🧭 길찾기</a>
-      <a href="https://www.google.com/search?q=${encodeURIComponent(it.name+' '+(t.dest||''))}" target="_blank" rel="noopener">🔍 검색</a>
+      <a href="https://search.naver.com/search.naver?where=blog&query=${sq}" target="_blank" rel="noopener">📝 네이버 블로그 후기</a>
+      <a href="https://search.naver.com/search.naver?query=${sq}" target="_blank" rel="noopener">🟢 네이버 검색</a>
+      <a href="https://www.google.com/search?tbm=isch&q=${sq}" target="_blank" rel="noopener">🖼️ 구글 이미지</a>
+      <a href="https://www.google.com/search?q=${sq}" target="_blank" rel="noopener">🔍 구글 검색</a>
     </div>`,
     [['🗺️ 지도에서 보기','btn gray',c=>{c();if(innerWidth<768)$('#mapWrap').classList.add('expanded');focusItem(it.id)}],
      ['✏️ 편집','btn ghost',c=>{c();placeForm(it,di)}]]);
   loadInfo(it).then(info=>{
     const box=$('#infoLoading');if(!box)return; // 창이 이미 닫힘
-    const tg=(info.osm&&info.osm.tags)||{},w=info.wiki;
+    const tg=(info.osm&&info.osm.tags)||{};
+    const ws=Array.isArray(info.wiki)?info.wiki:(info.wiki?[info.wiki]:[]),w=ws[0];
     let html='';
     const kind=info.osm&&info.osm.kind&&KIND_KO[info.osm.kind];
-    const subs=[kind,w&&w.desc].filter(Boolean);
+    const subs=[kind,ws.length===1&&w.desc].filter(Boolean);
     if(subs.length)html+=`<div class="info-sub" style="margin-top:0">${esc(subs.join(' · '))}</div>`;
-    if(w){
-      html+=`<p class="info-desc">${esc(w.text)}</p><div class="info-src">출처: <a href="${esc(w.url||'#')}" target="_blank" rel="noopener">${w.lang==='ko'?'한국어':'영어'} 위키백과 '${esc(w.title)}'</a>${w.lang!=='ko'?' (한국어 문서가 없어 영어 설명을 보여드려요)':''}</div>`;
-    }
+    ws.forEach(x=>{
+      if(ws.length>1)html+=`<div style="font-weight:700;margin:4px 0 6px">📖 ${esc(x.title)}${x.desc?` <span style="font-weight:400;color:var(--sub);font-size:.82rem">${esc(x.desc)}</span>`:''}</div>`;
+      html+=`<p class="info-desc">${esc(x.text)}</p><div class="info-src">출처: <a href="${esc(x.url||'#')}" target="_blank" rel="noopener">${x.lang==='ko'?'한국어':'영어'} 위키백과 '${esc(x.title)}'</a>${x.lang!=='ko'?' (한국어 문서가 없어 영어 설명을 보여드려요)':''}</div>`;
+    });
+    // 저장된 위치가 실제 장소와 500m 이상 떨어져 있으면 고칠 수 있게
+    const fix=w&&w.lat!=null&&hav(w,it)>500?w:null;
+    if(fix)html+=`<div class="info-mine" style="background:#fff8e6;color:#7a5a00">📍 일정에 저장된 위치가 '${esc(fix.title)}'에서 ${fmtDist(hav(fix,it))} 떨어져 있어요. 이동 거리가 정확하려면 위치를 고쳐 주세요.<br><button class="small-btn" id="fixLocBtn" style="margin-top:6px">위치를 '${esc(fix.title)}'(으)로 고치기</button></div>`;
     const rows=[];
     const addr=(info.osm&&info.osm.addr)||it.addr;
     if(addr)rows.push(['📍',esc(addr)]);
@@ -888,9 +952,14 @@ function showInfo(it,di){
     if(tg.fee==='yes'||tg.charge)rows.push(['🎫',esc(tg.charge?'입장료 '+tg.charge:'입장료 있음')]);
     if(tg.wheelchair==='yes')rows.push(['♿','휠체어 이용 가능']);
     if(rows.length)html+=`<div class="info-rows">${rows.map(r=>`<div><span>${r[0]}</span><span>${r[1]}</span></div>`).join('')}</div>`;
-    if(!w&&!rows.length)html+=`<div class="hint">이 장소에 대한 설명을 찾지 못했어요.<br>아래 <b>구글 지도</b>에서 리뷰와 사진을 볼 수 있어요.</div>`;
-    else if(!w)html+=`<div class="hint" style="padding-top:0">위키백과 설명이 없는 곳이에요. 리뷰·사진은 아래 <b>구글 지도</b>에서 확인하세요.</div>`;
+    if(!w&&!rows.length)html+=`<div class="hint">이 장소에 대한 설명을 찾지 못했어요.<br>아래 <b>구글 지도</b>나 <b>네이버 블로그 후기</b>에서 리뷰와 사진을 볼 수 있어요.</div>`;
+    else if(!w)html+=`<div class="hint" style="padding-top:0">위키백과 설명이 없는 곳이에요. 리뷰·사진은 아래 <b>구글 지도</b>나 <b>네이버 블로그 후기</b>에서 확인하세요.</div>`;
     box.outerHTML=html;
+    if(fix)$('#fixLocBtn').onclick=()=>{
+      it.lat=+fix.lat.toFixed(6);it.lng=+fix.lng.toFixed(6);save();
+      $('#fixLocBtn').parentElement.outerHTML='<div class="hint">✅ 위치를 고쳤어요. 지도와 이동 거리에 바로 반영돼요.</div>';
+      S.fitNext=false;renderTrip(false);
+    };
     if(w&&w.img)$('#infoBody').insertAdjacentHTML('afterbegin',`<img class="info-photo" src="${esc(w.img)}" alt="" onerror="this.remove()">`);
   });
 }
