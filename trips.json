@@ -73,11 +73,21 @@
        "cat": "sight",
        "time": "",
        "memo": ""
+      },
+      {
+       "id": "vvamp9uk2w51",
+       "name": "인천국제공항",
+       "lat": 37.4625,
+       "lng": 126.43916666667,
+       "addr": "인천광역시 영종구 운서동에 위치한 국제공항",
+       "cat": "sight",
+       "time": "",
+       "memo": ""
       }
      ]
     }
    ],
-   "updatedAt": 1795583532924
+   "updatedAt": 1795583542069
   }
  ],
  "deleted": []
