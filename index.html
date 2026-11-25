@@ -7,9 +7,9 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <title>나의 여행 플래너</title>
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.2/Sortable.min.js"></script>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="anonymous">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin="anonymous"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.2/Sortable.min.js" crossorigin="anonymous"></script>
 <style>
 :root{
   --accent:#2f6bff; --accent-weak:#eaf0ff; --text:#1d2433; --sub:#6b7385; --line:#e7e9ef;
@@ -245,7 +245,7 @@ const CATS=[['sight','🏛️','관광'],['food','🍽️','맛집'],['cafe','�
 const MODES=[['line','직선'],['foot','도보'],['car','자동차']];
 const WEEK=['일','월','화','수','목','금','토'];
 
-const DKEY='tripPlanner.deleted.v1', GKEY='tripPlanner.github.v1';
+const DKEY='tripPlanner.deleted.v1', GKEY='tripPlanner.github.v1', GCKEY='tripPlanner.ghcache.v1';
 const S={trips:[],deleted:[],trip:null,day:0,focus:null,pick:false,fitNext:true};
 let map,layer,routeCache={};
 
@@ -527,8 +527,8 @@ const MAPS=[
    skipOnFile:true}, // 공식 서버는 PC에서 파일을 직접 열면(file://) 막힘 → 이때는 건너뜀
   {name:'OpenStreetMap (프랑스 서버)',url:'https://{s}.tile.openstreetmap.fr/osmfr/{z}/{x}/{y}.png',opt:{subdomains:'abc',maxZoom:20,attribution:OSM_ATTR+' · OSM France',crossOrigin:'anonymous'},check:true},
   {name:'OpenStreetMap (독일 서버)',url:'https://tile.openstreetmap.de/{z}/{x}/{y}.png',opt:{maxZoom:19,attribution:OSM_ATTR+' · OSM Deutschland',crossOrigin:'anonymous'},check:true},
-  {name:'Esri 지도',url:'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',opt:{maxZoom:19,attribution:'Tiles &copy; Esri'}},
-  {name:'위성 (Esri)',url:'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',opt:{maxZoom:19,attribution:'Tiles &copy; Esri'},noAuto:true},
+  {name:'Esri 지도',url:'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',opt:{maxZoom:19,attribution:'Tiles &copy; Esri',crossOrigin:'anonymous'}},
+  {name:'위성 (Esri)',url:'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',opt:{maxZoom:19,attribution:'Tiles &copy; Esri',crossOrigin:'anonymous'},noAuto:true},
 ];
 const TKEY='tripPlanner.tiles.v7';
 const IS_FILE=location.protocol==='file:';
@@ -568,7 +568,7 @@ async function switchMap(m,reason){
 }
 function setupTiles(){
   MAPS.forEach(m=>{
-    const l=L.tileLayer(m.url,m.opt);l._ok=0;l._err=0;
+    const l=L.tileLayer(m.url,{updateWhenZooming:false,updateWhenIdle:true,keepBuffer:3,...m.opt});l._ok=0;l._err=0; // 확대·축소 중간 단계 지도는 받지 않음
     l._chk=0;
     l.on('tileload',e=>{
       l._ok++;
@@ -634,12 +634,29 @@ function focusItem(id){
 }
 $('#fitBtn').onclick=()=>{S.fitNext=true;S.focus=null;renderMap()};
 $('#toggleMapBtn').onclick=()=>{$('#mapWrap').classList.toggle('expanded');setTimeout(()=>map.invalidateSize(),300)};
+/* 내 위치: 브라우저 보안 규칙상 https 주소(예: GitHub Pages)에서만 동작. 안 될 때 원인별로 안내 */
+function locHelp(kind){
+  const ios=/iPhone|iPad|iPod/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
+  const body={
+    insecure:`<p class="info-desc">브라우저는 보안 때문에 <b>https://</b> 로 시작하는 주소에서만 위치를 알려줘요.<br>지금은 <b>${esc(location.protocol==='file:'?'파일을 직접 연 상태':location.protocol+'//'+location.host)}</b>라서 위치를 쓸 수 없어요.</p>
+      <div class="info-mine">✅ 해결: GitHub Pages 주소(<b>https://내아이디.github.io/travel-planner/</b>)로 열어 주세요.<br>${ios?'아이폰은 Safari에서 이 주소를 열고 공유(⬆️) → <b>홈 화면에 추가</b>하면 앱처럼 쓸 수 있어요.':'휴대폰에서는 이 주소를 열고 <b>홈 화면에 추가</b>하면 앱처럼 쓸 수 있어요.'}</div>`,
+    denied:ios?`<p class="info-desc">위치 권한이 꺼져 있어요. 아이폰에서 아래를 확인해 주세요.</p>
+      <div class="info-rows"><div><span>1</span><span><b>설정 → 개인정보 보호 및 보안 → 위치 서비스</b>가 켜져 있는지, 목록의 <b>Safari 웹 사이트</b>가 <b>'앱을 사용하는 동안'</b>인지</span></div>
+      <div><span>2</span><span>Safari 주소창 왼쪽 <b>'가가'(또는 ⓐ) → 웹 사이트 설정 → 위치 → 허용</b></span></div>
+      <div><span>3</span><span>홈 화면에 추가한 앱이라면 앱을 완전히 닫았다가 다시 열기</span></div></div>`
+      :`<p class="info-desc">위치 권한이 거부되어 있어요. 주소창 왼쪽 자물쇠(🔒) 아이콘 → <b>위치 → 허용</b>으로 바꾼 뒤 새로고침해 주세요.</p>`,
+    fail:`<p class="info-desc">위치를 찾지 못했어요. 실내이거나 GPS 신호가 약할 수 있어요. 잠시 후 다시 눌러 주세요.</p>`
+  }[kind];
+  modal('내 위치를 쓸 수 없어요',body,[['확인','btn',c=>c()]]);
+}
 $('#locBtn').onclick=()=>{
-  if(!navigator.geolocation)return toast('위치 기능을 사용할 수 없어요');
+  if(!window.isSecureContext)return locHelp('insecure');
+  if(!navigator.geolocation)return toast('이 브라우저는 위치 기능을 지원하지 않아요');
+  toast('내 위치를 찾는 중…',1500);
   navigator.geolocation.getCurrentPosition(p=>{
     const ll=[p.coords.latitude,p.coords.longitude];map.setView(ll,15);
     L.circleMarker(ll,{radius:8,color:'#fff',weight:3,fillColor:'#2f6bff',fillOpacity:1}).addTo(layer);
-  },()=>toast('위치를 가져오지 못했어요 (https 주소에서만 동작)'),{enableHighAccuracy:true,timeout:8000});
+  },err=>locHelp(location.protocol==='file:'?'insecure':err.code===1?'denied':'fail'),{enableHighAccuracy:true,timeout:10000,maximumAge:60000});
 };
 
 /* 지도에서 직접 선택 */
@@ -1284,7 +1301,7 @@ const GH={
   },
   api(path,opt={},cfg=this.cfg){
     return fetch(`https://api.github.com/repos/${cfg.repo}${path}`,{...opt,cache:'no-store',
-      headers:{'Authorization':'Bearer '+cfg.token,'Accept':'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28',...(opt.body?{'Content-Type':'application/json'}:{})}});
+      headers:{'Authorization':'Bearer '+cfg.token,'Accept':'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28',...(opt.body?{'Content-Type':'application/json'}:{}),...(opt.headers||{})}});
   },
   fileUrl(){return '/contents/'+this.cfg.path.split('/').filter(Boolean).map(encodeURIComponent).join('/')},
   async error(r){
@@ -1292,9 +1309,15 @@ const GH={
     const msg={401:'토큰이 올바르지 않거나 만료됐어요',403:'권한이 없어요 (토큰의 Contents 읽기/쓰기 권한을 확인하세요)',404:'저장소를 찾을 수 없어요 (저장소 이름과 토큰 권한을 확인하세요)'}[r.status];
     const e=new Error(msg||`GitHub 오류 (${r.status}) ${m}`);e.status=r.status;return e;
   },
+  /* 데이터 절약: 지난번에 받은 파일의 ETag를 보내서, 바뀐 게 없으면 GitHub가 내용 없이 '304 그대로임'만 돌려줌 */
+  remoteKey(){return this.cfg.repo+'|'+this.cfg.branch+'|'+this.cfg.path},
+  loadRemote(){try{const c=JSON.parse(localStorage.getItem(GCKEY));return c&&c.key===this.remoteKey()?c:null}catch(e){return null}},
+  saveRemote(c){try{c?localStorage.setItem(GCKEY,JSON.stringify({...c,key:this.remoteKey()})):localStorage.removeItem(GCKEY)}catch(e){}},
   async pull(){
-    const r=await this.api(this.fileUrl()+'?ref='+encodeURIComponent(this.cfg.branch));
-    if(r.status===404)return{data:null,sha:null};
+    const cached=this.loadRemote();
+    const r=await this.api(this.fileUrl()+'?ref='+encodeURIComponent(this.cfg.branch),cached&&cached.etag?{headers:{'If-None-Match':cached.etag}}:{});
+    if(r.status===304&&cached){try{return{data:JSON.parse(cached.text),sha:cached.sha}}catch(e){this.saveRemote(null)}}
+    if(r.status===404){this.saveRemote(null);return{data:null,sha:null}}
     if(!r.ok)throw await this.error(r);
     const j=await r.json();let text;
     if(j.content)text=b64dec(j.content);
@@ -1303,15 +1326,20 @@ const GH={
       text=b64dec((await r2.json()).content);
     }
     let data;try{data=JSON.parse(text)}catch(e){throw new Error('GitHub의 저장 파일이 손상됐어요 ('+this.cfg.path+')')}
+    const etag=r.headers.get('ETag');
+    this.saveRemote(etag?{etag,sha:j.sha,text}:null);
     return{data,sha:j.sha};
   },
   async push(data,sha){
-    const body={message:'여행 플래너 저장 '+new Date().toLocaleString('ko-KR'),content:b64enc(JSON.stringify(data,null,1)),branch:this.cfg.branch};
+    const text=JSON.stringify(data); // 들여쓰기 없이 저장해 파일 크기를 줄임
+    const body={message:'여행 플래너 저장 '+new Date().toLocaleString('ko-KR'),content:b64enc(text),branch:this.cfg.branch};
     if(sha)body.sha=sha;
     const r=await this.api(this.fileUrl(),{method:'PUT',body:JSON.stringify(body)});
     if(r.status===409||r.status===422)return null; // 다른 기기가 먼저 저장함 → 다시 받아서 합치기
     if(!r.ok)throw await this.error(r);
-    return(await r.json()).content.sha;
+    const nsha=(await r.json()).content.sha;
+    this.saveRemote(null); // 새 버전의 ETag는 다음에 한 번 받아서 기억
+    return nsha;
   },
   queue(){
     if(!this.enabled())return;
@@ -1383,9 +1411,16 @@ const GH={
     ]);
   }
 };
-window.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')GH.sync()});
+let lastVisSync=0;window.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&Date.now()-lastVisSync>60000){lastVisSync=Date.now();GH.sync()}});
 window.addEventListener('online',()=>GH.sync());
-setInterval(()=>{if(document.visibilityState==='visible'&&GH.state!=='busy')GH.sync()},120000);
+// 다른 기기 변경 확인: 화면을 켜 둔 동안 5분마다 (바뀐 게 없으면 수백 바이트만 오감)
+setInterval(()=>{if(document.visibilityState==='visible'&&navigator.onLine!==false&&GH.state!=='busy')GH.sync()},300000);
+
+/* ================== 데이터 절약: 오프라인 저장소(서비스 워커) ==================
+   https 주소(GitHub Pages)에서만 동작. 한 번 본 지도 조각과 라이브러리를 기기에 저장해 다시 받지 않음 (sw.js 파일 필요) */
+if('serviceWorker' in navigator&&(location.protocol==='https:'||location.hostname==='localhost')){
+  window.addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{}));
+}
 
 /* ================== 시작 ================== */
 load();GH.loadCfg();renderHome();
