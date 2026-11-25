@@ -159,6 +159,16 @@ input,select,textarea{font:inherit;color:inherit}
 @media (max-width:420px){.sync-btn span{display:none}.sync-btn{padding:0 12px}}
 .note{background:#fff8e6;border-radius:10px;padding:10px 12px;font-size:.8rem;line-height:1.6;color:#7a5a00;margin-bottom:14px}
 .note.blue{background:var(--accent-weak);color:#1d3f99}
+.info-photo{width:calc(100% + 40px);margin:-6px -20px 12px;max-height:230px;object-fit:cover;display:block;background:#eef0f4}
+.info-sub{color:var(--sub);font-size:.85rem;margin:-4px 0 12px}
+.info-mine{background:var(--accent-weak);border-radius:10px;padding:10px 12px;font-size:.85rem;margin-bottom:14px;line-height:1.6}
+.info-desc{font-size:.92rem;line-height:1.75;margin:0 0 6px;white-space:pre-line}
+.info-src{font-size:.75rem;color:var(--sub);margin-bottom:14px}
+.info-src a{color:var(--sub)}
+.info-rows{border-top:1px solid var(--line);margin-bottom:12px}
+.info-rows div{display:flex;gap:10px;padding:10px 2px;border-bottom:1px solid var(--line);font-size:.88rem;line-height:1.5}
+.info-rows span:first-child{flex:none;width:22px;text-align:center}
+.info-rows a{color:var(--accent);word-break:break-all}
 .ext-links{display:flex;gap:8px;flex-wrap:wrap;margin-top:4px}
 .ext-links a{font-size:.8rem;padding:6px 10px;border-radius:9px;background:#f0f2f5;color:var(--text);text-decoration:none}
 </style>
@@ -457,10 +467,15 @@ $('#listWrap').onclick=e=>{
   else if(card){
     const di=+card.dataset.day,it=S.trip.days[di].items.find(x=>x.id===card.dataset.id);
     if(act==='edit')placeForm(it,di);
-    else if(act==='focus')focusItem(it.id);
+    else if(act==='focus'){focusItem(it.id);showInfo(it,di)}
   }
 };
 $('#addFab').onclick=()=>searchSheet();
+document.addEventListener('click',e=>{
+  const b=e.target.closest('[data-info]');if(!b||!S.trip)return;
+  const di=+b.dataset.day,it=S.trip.days[di]?.items.find(x=>x.id===b.dataset.info);
+  if(it){map.closePopup();showInfo(it,di)}
+});
 
 /* ================== 지도 ================== */
 function initMap(){
@@ -566,7 +581,7 @@ function renderMap(){
     d.items.forEach((it,j)=>{
       pts.push([it.lat,it.lng]);
       const mk=L.marker([it.lat,it.lng],{icon:pinIcon(j+1,c,S.focus===it.id),zIndexOffset:S.focus===it.id?1000:0}).addTo(layer);
-      mk.bindPopup(`<b>${catOf(it.cat)[1]} ${esc(it.name)}</b><br><span style="color:#6b7385;font-size:12px">Day ${di+1} · ${j+1}번째${it.time?' · '+esc(it.time):''}</span>${it.memo?`<br>${esc(it.memo)}`:''}`);
+      mk.bindPopup(`<b>${catOf(it.cat)[1]} ${esc(it.name)}</b><br><span style="color:#6b7385;font-size:12px">Day ${di+1} · ${j+1}번째${it.time?' · '+esc(it.time):''}</span>${it.memo?`<br>${esc(it.memo)}`:''}<br><button class="small-btn" style="margin-top:6px" data-info="${it.id}" data-day="${di}">ℹ️ 장소 설명 보기</button>`);
       mk.on('click',()=>{S.focus=it.id;highlightCard(it.id)});
       if(S.focus===it.id&&!fitting)setTimeout(()=>mk.openPopup(),0);
     });
@@ -608,13 +623,13 @@ async function onMapClick(e){
   if(!S.pick)return;endPick();
   const{lat,lng}=e.latlng;
   const tmp=L.marker([lat,lng],{icon:pinIcon('＋','#1d2433')}).addTo(layer);
-  let name='',addr='';
+  let name='',addr='',osm;
   try{
     const r=await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}&zoom=18&accept-language=ko`);
-    const j=await r.json();name=j.name||(j.display_name||'').split(',')[0];addr=shortAddr(j.display_name);
+    const j=await r.json();name=j.name||(j.display_name||'').split(',')[0];addr=shortAddr(j.display_name);if(j.name)osm=osmId(j.osm_type,j.osm_id);
   }catch(err){}
   tmp.remove();
-  placeForm({id:null,name:name||'선택한 장소',lat,lng,addr,cat:'sight',time:'',memo:''},S.day,true);
+  placeForm({id:null,name:name||'선택한 장소',lat,lng,addr,cat:'sight',time:'',memo:'',...(osm?{osm}:{})},S.day,true);
 }
 
 /* ================== 장소 검색 ================== */
@@ -644,11 +659,12 @@ const KO_CATS=[
 const isKo=q=>/[가-힣]/.test(q);
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 let lastNomi=0;
+const osmId=(t,id)=>t&&id?String(t)[0].toUpperCase()+id:undefined;
 async function nominatim(params){ // Nominatim 이용 규칙: 1초에 1번까지
   const wait=lastNomi+1100-Date.now();if(wait>0)await sleep(wait);lastNomi=Date.now();
   const r=await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&accept-language=ko&${params}`);
   if(!r.ok)throw new Error('nominatim '+r.status);
-  return(await r.json()).map(x=>({name:x.name||x.display_name.split(',')[0],addr:shortAddr(x.display_name),lat:+x.lat,lng:+x.lon,type:x.type}));
+  return(await r.json()).map(x=>({name:x.name||x.display_name.split(',')[0],addr:shortAddr(x.display_name),lat:+x.lat,lng:+x.lon,type:x.type,osm:osmId(x.osm_type,x.osm_id)}));
 }
 async function searchWiki(q){
   const r=await fetch('https://ko.wikipedia.org/w/api.php?action=query&format=json&origin=*&generator=search&gsrlimit=8&prop=pageprops|description&ppprop=wikibase_item&gsrsearch='+encodeURIComponent(q));
@@ -707,7 +723,7 @@ async function searchPlaces(q){
   try{
     const r=await fetch(`https://photon.komoot.io/api/?limit=15&lat=${c.lat}&lon=${c.lng}&q=${encodeURIComponent(q)}`);
     const j=await r.json();
-    return j.features.map(f=>{const p=f.properties;return{name:p.name||p.street||q,addr:[p.street,p.district,p.city,p.state,p.country].filter(Boolean).join(', '),lat:f.geometry.coordinates[1],lng:f.geometry.coordinates[0],type:p.osm_value}}).map(x=>({...x,dist:hav(x,c)}));
+    return j.features.map(f=>{const p=f.properties;return{name:p.name||p.street||q,addr:[p.street,p.district,p.city,p.state,p.country].filter(Boolean).join(', '),lat:f.geometry.coordinates[1],lng:f.geometry.coordinates[0],type:p.osm_value,osm:osmId(p.osm_type,p.osm_id)}}).map(x=>({...x,dist:hav(x,c)}));
   }catch(e){return ok?[]:null}
 }
 function guessCat(type){
@@ -737,12 +753,147 @@ function searchSheet(){
   };
   $('#sRes').onclick=e=>{
     const el=e.target.closest('.result');if(!el)return;const r=results[+el.dataset.i];
-    const it={id:uid(),name:r.name,lat:r.lat,lng:r.lng,addr:(r.addr||'').replace(/ · 위키백과$/,''),cat:r.catHint||guessCat(r.type),time:'',memo:''};if(r.gid)it.gid=r.gid;
+    const it={id:uid(),name:r.name,lat:r.lat,lng:r.lng,addr:(r.addr||'').replace(/ · 위키백과$/,''),cat:r.catHint||guessCat(r.type),time:'',memo:''};if(r.gid)it.gid=r.gid;if(r.osm)it.osm=r.osm;if(r.src==='wiki')it.wiki=r.name;
     S.trip.days[S.day].items.push(it);save();close();S.focus=it.id;S.fitNext=true;renderTrip(false);
     toast(`'${r.name}' 추가됨`);
   };
 }
 
+/* ================== 장소 설명 ==================
+   무료 공개 데이터로 장소 정보를 모아 보여줌
+   - OpenStreetMap: 종류, 음식 종류, 영업시간, 전화, 웹사이트 (Nominatim 상세조회 또는 Overpass 주변 검색)
+   - 위키백과(한국어 우선, 없으면 영어): 설명 글과 사진 (위키데이터 연결 → 없으면 주변 위키 문서 중 이름이 비슷한 것)
+   - 식당처럼 위키 설명이 없는 곳은 구글 지도 링크로 리뷰·사진 확인 */
+const IKEY='tripPlanner.info.v1';
+let infoCache={};try{infoCache=JSON.parse(localStorage.getItem(IKEY))||{}}catch(e){}
+const KIND_KO={restaurant:'식당',cafe:'카페',bar:'바',pub:'펍',fast_food:'패스트푸드',ice_cream:'아이스크림',food_court:'푸드코트',biergarten:'비어가든',
+  place_of_worship:'종교 시설',museum:'박물관',attraction:'관광지',viewpoint:'전망대',hotel:'호텔',hostel:'호스텔',guest_house:'게스트하우스',apartment:'숙소',motel:'모텔',
+  park:'공원',garden:'정원',artwork:'예술 작품',gallery:'갤러리',monument:'기념물',memorial:'기념비',castle:'성',ruins:'유적',palace:'궁전',church:'교회',cathedral:'대성당',
+  marketplace:'시장',theatre:'극장',cinema:'영화관',zoo:'동물원',aquarium:'아쿠아리움',theme_park:'테마파크',beach:'해변',supermarket:'슈퍼마켓',mall:'쇼핑몰',
+  department_store:'백화점',bakery:'빵집',convenience:'편의점',clothes:'옷 가게',gift:'기념품 가게',station:'역',stadium:'경기장',square:'광장',tower:'탑',bridge:'다리',
+  information:'관광 안내소',pharmacy:'약국',hospital:'병원',library:'도서관',university:'대학교',historic:'역사 유적',archaeological_site:'유적지'};
+const CUISINE_KO={italian:'이탈리아',spanish:'스페인',tapas:'타파스',catalan:'카탈루냐',basque:'바스크',japanese:'일식',chinese:'중식',korean:'한식',pizza:'피자',burger:'버거',
+  seafood:'해산물',coffee_shop:'커피',regional:'향토 음식',mediterranean:'지중해',french:'프랑스',mexican:'멕시코',indian:'인도',thai:'태국',vietnamese:'베트남',
+  vegetarian:'채식',vegan:'비건',sushi:'스시',ramen:'라멘',steak_house:'스테이크',kebab:'케밥',sandwich:'샌드위치',chicken:'치킨',breakfast:'브런치',paella:'파에야',
+  american:'미국',greek:'그리스',turkish:'터키',portuguese:'포르투갈',german:'독일',international:'다국적',ice_cream:'아이스크림',cake:'케이크',noodle:'국수',asian:'아시아',
+  churros:'추로스',wine:'와인',beer:'맥주',crepe:'크레페',bagel:'베이글',donut:'도넛',dessert:'디저트',local:'로컬',grill:'그릴',barbecue:'바비큐',fish:'생선'};
+const DAY_KO={Mo:'월',Tu:'화',We:'수',Th:'목',Fr:'금',Sa:'토',Su:'일',PH:'공휴일'};
+const MON_KO={Jan:1,Feb:2,Mar:3,Apr:4,May:5,Jun:6,Jul:7,Aug:8,Sep:9,Oct:10,Nov:11,Dec:12};
+const hoursKo=h=>h.replace(/\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\b( \d{1,2}\b)?/g,(m,mo,d)=>MON_KO[mo]+'월'+(d?d+'일':'')).replace(/\b(Mo|Tu|We|Th|Fr|Sa|Su|PH)\b/g,m=>DAY_KO[m]).replace(/\boff\b|\bclosed\b/gi,'휴무').replace(/24\/7/,'24시간').replace(/;\s*/g,'\n');
+const nameBi=t=>{const n=String(t||'').replace(/\(.*?\)/g,'').replace(/[\s·,.'"\-]/g,'').toLowerCase(),o=new Set();for(let i=0;i<n.length-1;i++)o.add(n.slice(i,i+2));return o};
+const nameSim=(a,b)=>{const A=nameBi(a),B=nameBi(b);if(!A.size||!B.size)return 0;let c=0;A.forEach(g=>{if(B.has(g))c++});return c/Math.min(A.size,B.size)};
+
+async function osmDetails(it){
+  // 1) 검색에서 OSM 번호를 저장해 둔 경우: 정확한 상세조회
+  if(it.osm){
+    try{
+      const wait=lastNomi+1100-Date.now();if(wait>0)await sleep(wait);lastNomi=Date.now();
+      const r=await fetch(`https://nominatim.openstreetmap.org/lookup?format=jsonv2&extratags=1&namedetails=1&accept-language=ko&osm_ids=${it.osm}`);
+      const j=(await r.json())[0];
+      if(j)return{tags:{...(j.extratags||{}),...(j.namedetails||{}),[j.category]:j.type},addr:shortAddr(j.display_name),kind:j.type};
+    }catch(e){}
+  }
+  const pick=(arr,getNames)=>{let best=null,bs=0;arr.forEach(e=>{const sc=Math.max(...getNames(e).map(n=>nameSim(it.name,n)));if(sc>bs){bs=sc;best=e}});return bs>=0.5?best:null};
+  // 2) 이름으로 아주 좁은 범위(약 ±200m)에서 Nominatim 검색 (빠르고 정확)
+  try{
+    const d=0.002,box=`${it.lng-d},${it.lat+d},${it.lng+d},${it.lat-d}`;
+    const wait=lastNomi+1100-Date.now();if(wait>0)await sleep(wait);lastNomi=Date.now();
+    const r=await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&extratags=1&namedetails=1&accept-language=ko&limit=5&bounded=1&viewbox=${box}&q=${encodeURIComponent(it.name)}`);
+    const arr=await r.json();
+    const j=pick(arr,e=>[e.name,...Object.values(e.namedetails||{})]);
+    if(j){it.osm=it.osm||osmId(j.osm_type,j.osm_id);return{tags:{...(j.extratags||{}),...(j.namedetails||{}),[j.category]:j.type},addr:shortAddr(j.display_name),kind:j.type}}
+  }catch(e){}
+  // 3) 주변 60m 안의 이름 있는 장소 (Overpass, 여러 서버 중 먼저 응답하는 곳)
+  const q=`[out:json][timeout:10];nwr(around:60,${it.lat},${it.lng})[name];out tags center 40;`;
+  const ac=new AbortController();const tm=setTimeout(()=>ac.abort(),10000);
+  try{
+    const els=await Promise.any(['https://overpass-api.de/api/interpreter','https://overpass.kumi.systems/api/interpreter','https://maps.mail.ru/osm/tools/overpass/api/interpreter']
+      .map(h=>fetch(h+'?data='+encodeURIComponent(q),{signal:ac.signal}).then(r=>r.ok?r.json():Promise.reject()).then(j=>j.elements||[])));
+    const t=pick(els.map(e=>e.tags||{}),t=>[t.name,t['name:ko'],t['name:en']].filter(Boolean));
+    if(t)return{tags:t,kind:t.amenity||t.tourism||t.shop||t.historic||t.leisure||t.building};
+  }catch(e){}finally{clearTimeout(tm);ac.abort()}
+  return null;
+}
+async function wikiSummary(lang,title){
+  const r=await fetch(`https://${lang}.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title.replace(/ /g,'_'))}`);
+  if(!r.ok)return null;const j=await r.json();
+  if(j.type==='disambiguation'||!j.extract)return null;
+  return{text:j.extract,img:j.thumbnail?.source||j.originalimage?.source,url:j.content_urls?.desktop?.page,lang,title:j.title,desc:j.description};
+}
+async function wikiFor(it,tags){
+  try{
+    if(it.wiki){const w=await wikiSummary('ko',it.wiki);if(w)return w}
+    const qid=tags&&tags.wikidata;
+    if(qid){
+      const j=await(await fetch(`https://www.wikidata.org/w/api.php?action=wbgetentities&format=json&origin=*&props=sitelinks&sitefilter=kowiki|enwiki&ids=${qid}`)).json();
+      const sl=j.entities?.[qid]?.sitelinks||{};
+      if(sl.kowiki){const w=await wikiSummary('ko',sl.kowiki.title);if(w)return w}
+      if(sl.enwiki){const w=await wikiSummary('en',sl.enwiki.title);if(w)return w}
+    }
+    if(tags&&tags.wikipedia){const m=tags.wikipedia.match(/^([a-z-]+):(.+)$/);if(m){const w=await wikiSummary(m[1],m[2]);if(w)return w}}
+    // 주변 200m 안의 한국어 → 영어 위키 문서 중 이름이 비슷한 것
+    const names=[it.name,tags&&tags['name:ko'],tags&&tags['name:en'],tags&&tags.name].filter(Boolean);
+    for(const lang of ['ko','en']){
+      const g=await(await fetch(`https://${lang}.wikipedia.org/w/api.php?action=query&list=geosearch&format=json&origin=*&gsradius=200&gslimit=15&gscoord=${it.lat}|${it.lng}`)).json();
+      let best=null,bs=0;
+      (g.query?.geosearch||[]).forEach(p=>{const sc=Math.max(...names.map(n=>nameSim(n,p.title)));if(sc>bs){bs=sc;best=p}});
+      if(best&&bs>=0.5){const w=await wikiSummary(lang,best.title);if(w)return w}
+    }
+  }catch(e){}
+  return null;
+}
+async function loadInfo(it){
+  const key=`${it.name}|${it.lat.toFixed(5)},${it.lng.toFixed(5)}`;
+  const c=infoCache[key];if(c&&Date.now()-c.t<14*864e5)return c;
+  const osm=await osmDetails(it);
+  const wiki=await wikiFor(it,osm&&osm.tags);
+  const res={t:Date.now(),osm,wiki};
+  infoCache[key]=res;
+  try{const ks=Object.keys(infoCache);if(ks.length>300)delete infoCache[ks[0]];localStorage.setItem(IKEY,JSON.stringify(infoCache))}catch(e){}
+  return res;
+}
+function showInfo(it,di){
+  const t=S.trip,cat=catOf(it.cat),j=t.days[di].items.indexOf(it);
+  const gq=it.gid?encodeURIComponent(it.name)+'&query_place_id='+it.gid:encodeURIComponent(it.name)+'%20'+it.lat+','+it.lng;
+  const close=modal(it.name,`<div id="infoBody">
+      <div class="info-sub">${cat[1]} ${cat[2]}</div>
+      <div class="info-mine">🗓️ Day ${di+1} · ${dayLabel(addDays(t.start,di))} · ${j+1}번째${it.time?' · ⏰ '+esc(it.time):''}${it.memo?`<br>📝 ${esc(it.memo)}`:''}</div>
+      <div class="hint" id="infoLoading"><span class="spinner"></span> 장소 정보를 찾는 중…</div>
+    </div>
+    <div class="ext-links" style="margin-top:8px">
+      <a href="https://www.google.com/maps/search/?api=1&query=${gq}" target="_blank" rel="noopener">⭐ 구글 지도 (리뷰·사진)</a>
+      <a href="https://www.google.com/maps/dir/?api=1&destination=${it.lat},${it.lng}" target="_blank" rel="noopener">🧭 길찾기</a>
+      <a href="https://www.google.com/search?q=${encodeURIComponent(it.name+' '+(t.dest||''))}" target="_blank" rel="noopener">🔍 검색</a>
+    </div>`,
+    [['🗺️ 지도에서 보기','btn gray',c=>{c();if(innerWidth<768)$('#mapWrap').classList.add('expanded');focusItem(it.id)}],
+     ['✏️ 편집','btn ghost',c=>{c();placeForm(it,di)}]]);
+  loadInfo(it).then(info=>{
+    const box=$('#infoLoading');if(!box)return; // 창이 이미 닫힘
+    const tg=(info.osm&&info.osm.tags)||{},w=info.wiki;
+    let html='';
+    const kind=info.osm&&info.osm.kind&&KIND_KO[info.osm.kind];
+    const subs=[kind,w&&w.desc].filter(Boolean);
+    if(subs.length)html+=`<div class="info-sub" style="margin-top:0">${esc(subs.join(' · '))}</div>`;
+    if(w){
+      html+=`<p class="info-desc">${esc(w.text)}</p><div class="info-src">출처: <a href="${esc(w.url||'#')}" target="_blank" rel="noopener">${w.lang==='ko'?'한국어':'영어'} 위키백과 '${esc(w.title)}'</a>${w.lang!=='ko'?' (한국어 문서가 없어 영어 설명을 보여드려요)':''}</div>`;
+    }
+    const rows=[];
+    const addr=(info.osm&&info.osm.addr)||it.addr;
+    if(addr)rows.push(['📍',esc(addr)]);
+    if(tg.cuisine)rows.push(['🍽️',esc(tg.cuisine.split(/[;,]/).map(x=>CUISINE_KO[x.trim()]||x.trim().replace(/_/g,' ')).join(', '))]);
+    if(tg.opening_hours)rows.push(['🕒',esc(hoursKo(tg.opening_hours))+'<br><span style="color:var(--sub);font-size:.78rem">OpenStreetMap 정보라 실제와 다를 수 있어요</span>']);
+    const phone=tg.phone||tg['contact:phone'];if(phone)rows.push(['📞',esc(phone)]);
+    const web=tg.website||tg['contact:website']||tg.url;
+    if(web&&/^https?:\/\//i.test(web))rows.push(['🌐',`<a href="${esc(web)}" target="_blank" rel="noopener">${esc(web.replace(/^https?:\/\/(www\.)?/,'').replace(/\/$/,''))}</a>`]);
+    if(tg.fee==='yes'||tg.charge)rows.push(['🎫',esc(tg.charge?'입장료 '+tg.charge:'입장료 있음')]);
+    if(tg.wheelchair==='yes')rows.push(['♿','휠체어 이용 가능']);
+    if(rows.length)html+=`<div class="info-rows">${rows.map(r=>`<div><span>${r[0]}</span><span>${r[1]}</span></div>`).join('')}</div>`;
+    if(!w&&!rows.length)html+=`<div class="hint">이 장소에 대한 설명을 찾지 못했어요.<br>아래 <b>구글 지도</b>에서 리뷰와 사진을 볼 수 있어요.</div>`;
+    else if(!w)html+=`<div class="hint" style="padding-top:0">위키백과 설명이 없는 곳이에요. 리뷰·사진은 아래 <b>구글 지도</b>에서 확인하세요.</div>`;
+    box.outerHTML=html;
+    if(w&&w.img)$('#infoBody').insertAdjacentHTML('afterbegin',`<img class="info-photo" src="${esc(w.img)}" alt="" onerror="this.remove()">`);
+  });
+}
 /* ================== 장소 편집 ================== */
 function placeForm(it,di,isNew){
   const t=S.trip;let cat=it.cat||'sight';
