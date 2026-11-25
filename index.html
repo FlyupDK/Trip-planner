@@ -169,6 +169,30 @@ input,select,textarea{font:inherit;color:inherit}
 .info-rows div{display:flex;gap:10px;padding:10px 2px;border-bottom:1px solid var(--line);font-size:.88rem;line-height:1.5}
 .info-rows span:first-child{flex:none;width:22px;text-align:center}
 .info-rows a{color:var(--accent);word-break:break-all}
+.tab-book{background:#e6f7ef;color:#0f8a5f}
+.tab-book.on{background:#0f8a5f;color:#fff}
+.bk{display:inline-block;font-size:.72rem;font-weight:700;padding:1px 7px;border-radius:9px;margin-right:6px;vertical-align:1px}
+.bk.todo{background:#fff1e0;color:#c25e00}.bk.done{background:#e6f7ef;color:#0f8a5f}
+.bk-progress{background:#fff;border-radius:var(--radius);padding:14px;box-shadow:0 1px 3px rgba(0,0,0,.06);margin-bottom:6px}
+.bk-progress .bar{height:8px;border-radius:4px;background:#e8eaef;overflow:hidden;margin-top:8px}
+.bk-progress .bar i{display:block;height:100%;background:#12b886;border-radius:4px;transition:width .3s}
+.bk-sec{font-weight:700;font-size:.92rem;margin:18px 2px 8px;display:flex;align-items:center;gap:6px}
+.bk-sec small{color:var(--sub);font-weight:400}
+.bk-row{display:flex;gap:12px;align-items:flex-start;background:#fff;border-radius:var(--radius);padding:12px;box-shadow:0 1px 3px rgba(0,0,0,.06);margin-bottom:8px;cursor:pointer}
+.bk-check{width:26px;height:26px;border-radius:50%;border:2px solid #f08c00;flex:none;display:grid;place-items:center;font-weight:900;color:#fff;margin-top:1px}
+.bk-row.done .bk-check{background:#12b886;border-color:#12b886}
+.bk-row.skip{opacity:.6}.bk-row.skip .bk-check{border-color:#adb5bd}
+.bk-main{flex:1;min-width:0}
+.bk-name{font-weight:700}
+.bk-sub{font-size:.8rem;color:var(--sub);margin-top:2px}
+.bk-detail{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.bk-detail span{font-size:.82rem;background:#f1f3f5;border-radius:8px;padding:4px 8px;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis}
+.bk-detail span.num{background:#e6f7ef;color:#0f8a5f;font-weight:700;letter-spacing:.3px}
+.bk-go{color:var(--accent);font-size:.82rem;font-weight:700;white-space:nowrap;margin-top:3px}
+.seg3{display:flex;background:#eef0f4;border-radius:12px;padding:4px;gap:4px}
+.seg3 button{flex:1;padding:9px 4px;border-radius:9px;font-weight:600;font-size:.88rem;color:var(--sub)}
+.seg3 button.on{background:#fff;color:var(--text);box-shadow:0 1px 3px rgba(0,0,0,.12)}
+.seg3 button.on[data-st=done]{background:#12b886;color:#fff}
 .ext-links{display:flex;gap:8px;flex-wrap:wrap;margin-top:4px}
 .ext-links a{font-size:.8rem;padding:6px 10px;border-radius:9px;background:#f0f2f5;color:var(--text);text-decoration:none}
 </style>
@@ -392,13 +416,15 @@ $('#tripMenuBtn').onclick=()=>{const t=S.trip;menu(t.title,[
 function renderTrip(fit){
   const t=S.trip;if(!t)return;
   if(fit)S.fitNext=true;
+  if(syncBookings(t))save(t,{sync:true});
   $('#tripTitle').innerHTML=`${esc(t.title)} <span class="sub">${t.start.slice(5).replace('-','.')}~${t.end.slice(5).replace('-','.')}</span>`;
   // 탭
   $('#tabs').innerHTML=`<button class="tab ${S.day===-1?'on':''}" data-d="-1">전체</button>`+
-    t.days.map((d,i)=>`<button class="tab ${S.day===i?'on':''}" data-d="${i}">Day ${i+1}<small>${dayLabel(addDays(t.start,i))}</small></button>`).join('');
+    t.days.map((d,i)=>`<button class="tab ${S.day===i?'on':''}" data-d="${i}">Day ${i+1}<small>${dayLabel(addDays(t.start,i))}</small></button>`).join('')+
+    (()=>{const st=bookingStats(t);return `<button class="tab tab-book ${S.day===-2?'on':''}" data-d="-2">✅ 예약${st.total?`<small>${st.done}/${st.total}</small>`:''}</button>`})();
   const onTab=$('#tabs .tab.on');if(onTab&&fit)onTab.scrollIntoView({inline:'center',block:'nearest'});
   renderList();renderMap();
-  $('#addFab').classList.toggle('hidden',S.day===-1);
+  $('#addFab').classList.toggle('hidden',S.day<0);
 }
 $('#tabs').onclick=e=>{const b=e.target.closest('.tab');if(!b)return;S.day=+b.dataset.d;S.focus=null;endPick();renderTrip(true);$('#listWrap').scrollTop=0};
 
@@ -415,6 +441,7 @@ function segHtml(s,c,mode){
 }
 function renderList(){
   const t=S.trip,w=$('#listWrap');
+  if(S.day===-2){renderBookings();return}
   if(S.day===-1){
     let total=0,html=`<div class="day-head"><h2>전체 일정</h2><span class="info"></span>${modeSeg()}</div>`;
     html+=`<div class="legend">${t.days.map((d,i)=>`<span><i style="background:${color(i)}"></i>Day ${i+1}</span>`).join('')}</div>`;
@@ -449,7 +476,7 @@ function cardHtml(it,j,di,drag){
     <div class="num" style="background:${color(di)}">${j+1}</div>
     <div class="body" data-act="focus">
       <div class="name">${it.time?`<span class="time">${esc(it.time)}</span>`:''}${cat[1]} ${esc(it.name)}</div>
-      <div class="desc">${esc(it.memo||cat[2]+(it.addr?' · '+it.addr:''))}</div>
+      <div class="desc">${bookingBadge(it)}${esc(it.memo||cat[2]+(it.addr?' · '+it.addr:''))}</div>
     </div>
     <button class="icon-btn" data-act="edit" title="편집" style="width:34px;font-size:1rem">✏️</button>
     ${drag?'<div class="handle" title="끌어서 순서 변경">≡</div>':''}
@@ -459,7 +486,10 @@ $('#listWrap').onclick=e=>{
   const m=e.target.closest('[data-mode]');
   if(m){S.trip.mode=m.dataset.mode;save();renderTrip(false);return}
   const g=e.target.closest('[data-goto]');if(g){S.day=+g.dataset.goto;renderTrip(true);$('#listWrap').scrollTop=0;return}
+  const bkr=e.target.closest('[data-bk]');
+  if(bkr){const b=S.trip.bookings.find(x=>x.id===bkr.dataset.bk);if(b)bookingForm(b);return}
   const a=e.target.closest('[data-act]');if(!a)return;
+  if(a.dataset.act==='bkAdd'){bookingForm({id:uid(),itemId:null,status:'todo',source:'manual',reason:'',name:'',date:'',time:'',number:'',memo:'',link:''},true);return}
   const act=a.dataset.act,card=e.target.closest('.card');
   if(act==='search')searchSheet();
   else if(act==='pick')startPick();
@@ -566,6 +596,7 @@ function pinIcon(n,c,big){
 function renderMap(){
   if(!map)return;layer.clearLayers();
   const t=S.trip,pts=[],fitting=S.fitNext;
+  if(S.day===-2){renderBookingMap();return}
   const days=S.day===-1?t.days.map((d,i)=>[d,i]):[[t.days[S.day],S.day]];
   days.forEach(([d,di])=>{
     const c=color(di),segs=daySegments(d,t.mode);
@@ -613,7 +644,7 @@ $('#locBtn').onclick=()=>{
 
 /* 지도에서 직접 선택 */
 function startPick(){
-  if(S.day===-1)return toast('먼저 일자를 선택하세요');
+  if(S.day<0)return toast('먼저 일자를 선택하세요');
   S.pick=true;$('#pickBanner').classList.remove('hidden');$('#map').style.cursor='crosshair';
   if(!$('#mapWrap').classList.contains('expanded')&&innerWidth<768)$('#mapWrap').classList.add('expanded');
 }
@@ -736,7 +767,7 @@ function guessCat(type){
   return'sight';
 }
 function searchSheet(){
-  if(S.day===-1)return toast('먼저 일자를 선택하세요');
+  if(S.day<0)return toast('먼저 일자를 선택하세요');
   const close=modal(`Day ${S.day+1}에 장소 추가`,`
     <form class="search-box" id="sForm"><input id="sQ" placeholder="장소, 주소 검색 (예: 도톤보리)" autocomplete="off" enterkeyhint="search"><button class="btn">검색</button></form>
     <div id="sRes"><div class="hint">💡 한글로 검색해도 돼요. 예) <b>구엘 공원</b>, <b>카사밀라</b>, <b>람블라스</b><br>'<b>카페</b>', '<b>맛집</b>', '<b>약국</b>'처럼 종류로 찾으면 지금 지도 화면 근처에서 찾아요.<br>그래도 없으면 영어나 현지어로 검색해 보세요.<br>찾는 곳이 없다면 <b>지도에서 선택</b>으로 직접 찍을 수 있어요.</div></div>`,
@@ -759,6 +790,135 @@ function searchSheet(){
   };
 }
 
+/* ================== 예약 체크리스트 ==================
+   일정의 장소 중 예약이 필요해 보이는 곳(숙소, 기차·항공, 입장권이 필요한 명소, 메모에 '예약'·'티켓' 등)을
+   자동으로 체크리스트에 올리고, 예약 날짜·시간·예약 번호를 기록. 데이터는 여행(trip.bookings)에 저장돼 GitHub에도 함께 저장됨 */
+const BOOK_KW=/(예약|티켓|입장권|투어|가이드|공연|플라멩코|쇼$|콘서트|뮤지컬|오페라|발레|경기|축구|미슐랭|코스\s?요리|파인\s?다이닝|오마카세|타블라오)/;
+const BOOK_SIGHT=/(대성당|성당|궁전|알카사르|알함브라|알람브라|박물관|미술관|사그라다|구엘|카사\s?(바트요|밀라)|라 ?페드레라|메스키타|전망대|타워|스타디움|캄프\s?누|아쿠아리움|동물원|테마파크|동굴|성$|성\s|루브르|바티칸|콜로세움|에펠|왕궁|수도원)/;
+const BOOK_MOVE=/(기차|열차|렌페|renfe|ave|ouigo|이리오|iryo|고속|항공|비행|공항|버스|페리|렌터카|렌트카|렌트)/i;
+const NO_BOOK=/(예약\s*(불필요|필요\s*없|안\s*해도|x)|무료\s*입장)/i;
+const FREE_PLACE=/(광장|거리|시장|해변|다리|공원|골목|산책|해안)/;
+function infoTags(it){const c=infoCache[`${it.name}|${it.lat.toFixed(5)},${it.lng.toFixed(5)}`];return(c&&c.osm&&c.osm.tags)||{}}
+function needsBooking(it){
+  const memo=it.memo||'',txt=it.name+' '+memo;
+  if(NO_BOOK.test(memo))return null;
+  if(it.cat==='stay')return'숙소';
+  if(it.cat==='move'&&BOOK_MOVE.test(txt))return'교통편';
+  if(BOOK_KW.test(txt))return/공연|플라멩코|쇼$|콘서트|뮤지컬|오페라|발레|타블라오/.test(txt)?'공연 티켓':/투어|가이드/.test(txt)?'투어':it.cat==='food'?'식당 예약':'예약·티켓';
+  const tg=infoTags(it);
+  if(/^(yes|required|recommended)$/.test(tg.reservation||''))return'예약 권장';
+  if(/(구엘\s?공원|알함브라|알람브라|사그라다|카사\s?바트요|카사\s?밀라|라\s?페드레라)/.test(it.name))return'입장권'; // 공원이라도 유료·시간 예약제
+  if(it.cat==='sight'&&!FREE_PLACE.test(it.name)&&(BOOK_SIGHT.test(it.name)||tg.fee==='yes'))return'입장권';
+  return null;
+}
+function syncBookings(t){
+  if(!Array.isArray(t.bookings))t.bookings=[];
+  let changed=false;const ids=new Set();
+  t.days.forEach((d,di)=>d.items.forEach(it=>{
+    const r=needsBooking(it);if(!r)return;ids.add(it.id);
+    const b=t.bookings.find(x=>x.itemId===it.id);
+    if(!b){t.bookings.push({id:uid(),itemId:it.id,name:it.name,status:'todo',source:'auto',reason:r,date:'',time:'',number:'',memo:'',link:''});changed=true}
+    else{if(b.source==='auto'&&b.reason!==r){b.reason=r;changed=true}if(b.name!==it.name){b.name=it.name;changed=true}}
+  }));
+  // 일정에서 조건이 사라진 자동 항목은 아무것도 입력하지 않았을 때만 정리
+  const before=t.bookings.length;
+  t.bookings=t.bookings.filter(b=>!(b.source==='auto'&&!ids.has(b.itemId)&&b.status==='todo'&&!b.date&&!b.number&&!b.memo));
+  return changed||t.bookings.length!==before;
+}
+function itemOf(t,id){for(let di=0;di<t.days.length;di++){const it=t.days[di].items.find(x=>x.id===id);if(it)return{it,di}}return null}
+function bookingStats(t){const bs=(t.bookings||[]).filter(b=>b.status!=='skip');return{total:bs.length,done:bs.filter(b=>b.status==='done').length}}
+function bookingOfItem(it){return S.trip&&(S.trip.bookings||[]).find(b=>b.itemId===it.id&&b.status!=='skip')}
+function fmtBkDate(b){
+  if(!b.date)return'';const d=parseD(b.date);return `${d.getMonth()+1}/${d.getDate()} (${WEEK[d.getDay()]})`;
+}
+function bookingBadge(it){
+  const b=bookingOfItem(it);if(!b)return'';
+  if(b.status==='done')return `<span class="bk done">✅ 예약완료${b.date||b.time?' '+esc([fmtBkDate(b).replace(/ \(.\)/,''),b.time].filter(Boolean).join(' ')):''}</span>`;
+  return `<span class="bk todo">🎫 예약 필요</span>`;
+}
+function bookingName(t,b){const r=b.itemId&&itemOf(t,b.itemId);return r?r.it.name:(b.name||'예약 항목')}
+function renderBookings(){
+  const t=S.trip,w=$('#listWrap');syncBookings(t);
+  const st=bookingStats(t),pct=st.total?Math.round(st.done/st.total*100):0;
+  const all=t.bookings.map(b=>({b,ref:b.itemId?itemOf(t,b.itemId):null}));
+  const dayKey=x=>x.ref?x.ref.di*10000+t.days[x.ref.di].items.indexOf(x.ref.it):9e9;
+  const todo=all.filter(x=>x.b.status==='todo').sort((a,b)=>dayKey(a)-dayKey(b));
+  const done=all.filter(x=>x.b.status==='done').sort((a,b)=>((a.b.date||'9')+(a.b.time||'')).localeCompare((b.b.date||'9')+(b.b.time||''))||dayKey(a)-dayKey(b));
+  const skip=all.filter(x=>x.b.status==='skip');
+  const row=x=>{
+    const b=x.b,name=bookingName(t,b);
+    const dayTxt=x.ref?`Day ${x.ref.di+1} · ${dayLabel(addDays(t.start,x.ref.di))}${x.ref.it.time?' '+esc(x.ref.it.time):''}`:(b.itemId?'일정에서 삭제된 장소':'직접 추가');
+    const det=[];
+    if(b.status==='done'){
+      if(b.date||b.time)det.push(`<span>📅 ${esc([fmtBkDate(b),b.time].filter(Boolean).join(' '))}</span>`);
+      if(b.number)det.push(`<span class="num">🔖 ${esc(b.number)}</span>`);
+    }
+    if(b.memo)det.push(`<span>📝 ${esc(b.memo)}</span>`);
+    return `<div class="bk-row ${b.status}" data-bk="${b.id}">
+      <div class="bk-check">${b.status==='done'?'✓':''}</div>
+      <div class="bk-main"><div class="bk-name">${esc(name)}</div>
+        <div class="bk-sub">${b.reason?`<b style="color:${b.status==='done'?'#0f8a5f':'#c25e00'};font-weight:600">${esc(b.reason)}</b> · `:''}${dayTxt}</div>
+        ${det.length?`<div class="bk-detail">${det.join('')}</div>`:''}
+      </div>
+      <div class="bk-go">${b.status==='todo'?'입력 ›':'수정 ›'}</div>
+    </div>`;
+  };
+  let html=`<div class="day-head"><span class="dot" style="background:#12b886"></span><h2>예약 체크리스트</h2><span class="info"></span>
+    <button class="small-btn" data-act="bkAdd">＋ 직접 추가</button></div>
+    <div class="bk-progress"><div style="display:flex;justify-content:space-between;font-size:.9rem"><b>예약 완료 ${st.done} / ${st.total}</b><span style="color:var(--sub)">${st.total?pct+'%':''}</span></div><div class="bar"><i style="width:${pct}%"></i></div>
+    <div class="hint" style="padding:8px 0 0">일정에 넣은 숙소·교통편·입장권이 필요한 명소, 메모에 '예약'·'티켓'이 있는 곳을 자동으로 올려요. 항공권·렌터카 같은 건 <b>＋ 직접 추가</b>로 넣으세요.</div></div>`;
+  html+=`<div class="bk-sec">🎫 예약 필요 <small>${todo.length}</small></div>`+(todo.length?todo.map(row).join(''):`<div class="day-empty">예약할 곳이 없어요 👍</div>`);
+  html+=`<div class="bk-sec">✅ 예약 완료 <small>${done.length} · 날짜·시간 순</small></div>`+(done.length?done.map(row).join(''):`<div class="day-empty">아직 예약 완료한 곳이 없어요</div>`);
+  if(skip.length)html+=`<details style="margin-top:14px"><summary class="bk-sec" style="cursor:pointer;display:list-item">🚫 예약 필요 없음 <small>${skip.length}</small></summary>${skip.map(row).join('')}</details>`;
+  w.innerHTML=html;
+}
+function renderBookingMap(){
+  const t=S.trip,pts=[];
+  (t.bookings||[]).forEach(b=>{
+    if(b.status==='skip')return;const r=b.itemId&&itemOf(t,b.itemId);if(!r)return;
+    const it=r.it,done=b.status==='done';pts.push([it.lat,it.lng]);
+    const mk=L.marker([it.lat,it.lng],{icon:pinIcon(done?'✓':'!',done?'#12b886':'#f08c00')}).addTo(layer);
+    mk.bindPopup(`<b>${esc(it.name)}</b><br><span style="font-size:12px;color:#6b7385">${done?'예약 완료 '+esc([fmtBkDate(b),b.time].filter(Boolean).join(' '))+(b.number?' · '+esc(b.number):''):'예약 필요'}</span>`);
+  });
+  if(S.fitNext){S.fitNext=false;if(pts.length>1)map.fitBounds(pts,{padding:[40,40],maxZoom:15});else if(pts.length)map.setView(pts[0],15)}
+}
+function bookingForm(b,isNew){
+  const t=S.trip,ref=b.itemId?itemOf(t,b.itemId):null;
+  let st=b.status==='todo'&&!isNew?'done':b.status; // 예약 전 항목을 열면 '예약 완료' 입력을 바로 할 수 있게
+  const defDate=ref?addDays(t.start,ref.di):t.start;
+  const close=modal(isNew?'예약 항목 추가':bookingName(t,b),`
+    ${ref?`<div class="info-mine">🗓️ Day ${ref.di+1} · ${dayLabel(addDays(t.start,ref.di))}${ref.it.time?' · ⏰ '+esc(ref.it.time):''}${b.reason?' · '+esc(b.reason):''}</div>`:''}
+    ${!ref?`<div class="field"><label>이름</label><input id="bName" value="${esc(b.name||'')}" placeholder="예) 인천→바르셀로나 항공권, 렌터카, 유심"></div>`:''}
+    <div class="field"><label>예약 상태</label><div class="seg3" id="bSt">
+      <button type="button" data-st="todo">예약 전</button><button type="button" data-st="done">예약 완료</button><button type="button" data-st="skip">필요 없음</button></div></div>
+    <div id="bDetail">
+      <div class="row2">
+        <div class="field"><label>예약 날짜</label><input type="date" id="bDate" value="${esc(b.date||'')}"></div>
+        <div class="field"><label>예약 시간</label><input type="time" id="bTime" value="${esc(b.time||'')}"></div>
+      </div>
+      <div class="field"><label>예약 번호</label><input id="bNum" value="${esc(b.number||'')}" placeholder="예) ABC-12345" autocapitalize="characters" autocomplete="off"></div>
+    </div>
+    <div class="field"><label>메모 (인원, 금액, 입장 방법 등)</label><input id="bMemo" value="${esc(b.memo||'')}" placeholder="예) 2명, €52, 모바일 티켓"></div>
+    <div class="field"><label>예약 사이트·확인 메일 링크 (선택)</label><input id="bLink" value="${esc(b.link||'')}" placeholder="https://" inputmode="url" autocomplete="off"></div>
+    ${b.link&&/^https?:\/\//.test(b.link)?`<div class="ext-links"><a href="${esc(b.link)}" target="_blank" rel="noopener">🔗 예약 링크 열기</a></div>`:''}
+    ${ref?`<div class="ext-links" style="margin-top:6px"><a href="https://www.google.com/search?q=${encodeURIComponent(ref.it.name+' '+(t.dest||'')+' 예약')}" target="_blank" rel="noopener">🔍 '${esc(ref.it.name)} 예약' 검색</a></div>`:''}`,
+  [
+    ...(isNew?[]:[[b.source==='auto'?'목록에서 빼기':'삭제','btn danger',c=>{
+      if(b.source==='auto'){b.status='skip'}else{if(!confirm('이 예약 항목을 삭제할까요?'))return;t.bookings=t.bookings.filter(x=>x!==b)}
+      save();c();renderTrip(false)}]]),
+    ['저장','btn',c=>{
+      if(!ref){const n=$('#bName').value.trim();if(!n)return toast('이름을 입력하세요');b.name=n}
+      Object.assign(b,{status:st,date:$('#bDate').value,time:$('#bTime').value,number:$('#bNum').value.trim(),memo:$('#bMemo').value.trim(),link:$('#bLink').value.trim()});
+      if(isNew)t.bookings.push(b);
+      save();c();renderTrip(false);toast(st==='done'?'예약 정보를 저장했어요':'저장했어요');
+    }]
+  ]);
+  const paint=()=>{document.querySelectorAll('#bSt button').forEach(x=>x.classList.toggle('on',x.dataset.st===st));$('#bDetail').style.opacity=st==='done'?1:.45};
+  $('#bSt').onclick=e=>{const x=e.target.closest('[data-st]');if(!x)return;st=x.dataset.st;if(st==='done'&&!$('#bDate').value)$('#bDate').value=defDate;paint()};
+  if(st==='done'&&!b.date)$('#bDate').value=defDate;
+  if(st==='done'&&!b.time&&ref&&ref.it.time)$('#bTime').value=ref.it.time;
+  paint();
+}
 /* ================== 장소 설명 ==================
    무료 공개 데이터로 장소 정보를 모아 보여줌
    - OpenStreetMap: 종류, 음식 종류, 영업시간, 전화, 웹사이트 (Nominatim 상세조회 또는 Overpass 주변 검색)
@@ -1025,7 +1185,8 @@ function cleanTrip(t){
     .map(it=>({...it,id:it.id||uid(),name:String(it.name||'이름 없는 장소'),lat:+it.lat,lng:+it.lng,time:it.time||'',memo:it.memo||'',cat:it.cat||'sight'}))}));
   if(!days.length)days.push({items:[]});
   const end=/^\d{4}-\d{2}-\d{2}$/.test(t.end||'')?t.end:addDays(t.start,days.length-1);
-  return{...t,id:t.id||uid(),title:String(t.title||'가져온 여행'),dest:t.dest||'',start:t.start,end,mode:t.mode||'line',center:t.center||null,days};
+  const bookings=(Array.isArray(t.bookings)?t.bookings:[]).filter(b=>b&&typeof b==='object').map(b=>({...b,id:b.id||uid(),status:['todo','done','skip'].includes(b.status)?b.status:'todo'}));
+  return{...t,id:t.id||uid(),title:String(t.title||'가져온 여행'),dest:t.dest||'',start:t.start,end,mode:t.mode||'line',center:t.center||null,days,bookings};
 }
 $('#importFile').onchange=async e=>{
   const files=[...e.target.files];e.target.value='';if(!files.length)return;
@@ -1064,6 +1225,11 @@ function tripText(t){
     });
     if(!d.items.length)s+=' (일정 없음)\n';
   });
+  const bs=(t.bookings||[]).filter(b=>b.status!=='skip');
+  if(bs.length){
+    s+=`\n■ 예약 (${bs.filter(b=>b.status==='done').length}/${bs.length} 완료)\n`;
+    bs.forEach(b=>{s+=` ${b.status==='done'?'✅':'⬜'} ${bookingName(t,b)}${b.status==='done'?' - '+[fmtBkDate(b),b.time,b.number&&'예약번호 '+b.number].filter(Boolean).join(' '):''}${b.memo?' ('+b.memo+')':''}\n`});
+  }
   return s;
 }
 async function copyText(s){
