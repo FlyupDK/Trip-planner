@@ -48,6 +48,8 @@ input,select,textarea{font:inherit;color:inherit}
 .trip-card .meta{color:var(--sub);font-size:.85rem;line-height:1.6}
 .dday{position:absolute;top:16px;right:16px;font-size:.78rem;font-weight:700;padding:4px 9px;border-radius:20px;background:var(--accent-weak);color:var(--accent)}
 .dday.past{background:#eef0f4;color:var(--sub)}
+.home-actions{display:flex;gap:8px;justify-content:flex-end;max-width:1200px;margin:0 auto 12px}
+.home-actions button{display:inline-flex;align-items:center;gap:6px;padding:9px 14px;border-radius:10px;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.08);font-size:.88rem;font-weight:600}
 .empty{text-align:center;color:var(--sub);padding:60px 20px;line-height:1.8}
 .empty .big{font-size:3rem}
 .fab{position:fixed;right:calc(20px + var(--safe-r));bottom:calc(20px + var(--safe-b));z-index:600;
@@ -170,7 +172,7 @@ input,select,textarea{font:inherit;color:inherit}
     <button class="sync-btn" title="GitHub 저장 상태"><i></i><span>저장 꺼짐</span></button>
     <button class="icon-btn" id="homeMenuBtn" title="메뉴">⋯</button>
   </div>
-  <div class="content"><div class="trip-grid" id="tripGrid"></div></div>
+  <div class="content"><div class="home-actions"><button id="importBtn">📥 JSON 가져오기</button><button id="exportAllBtn">📤 전체 내보내기</button></div><div class="trip-grid" id="tripGrid"></div></div>
   <button class="fab" id="newTripBtn">＋ 새 여행</button>
 </section>
 
@@ -199,7 +201,7 @@ input,select,textarea{font:inherit;color:inherit}
 </section>
 
 <div id="modalRoot"></div>
-<input type="file" id="importFile" accept=".json,application/json" class="hidden">
+<input type="file" id="importFile" accept=".json,application/json" multiple class="hidden">
 
 <script>
 /* ================== 기본 설정 ================== */
@@ -297,7 +299,7 @@ function daySegments(day,mode){
 function renderHome(){
   const g=$('#tripGrid');
   if(!S.trips.length){
-    g.innerHTML=`<div class="empty" style="grid-column:1/-1"><div class="big">🧳</div>아직 여행이 없어요.<br>아래 <b>＋ 새 여행</b>을 눌러 첫 여행을 계획해 보세요.</div>`;return;
+    g.innerHTML=`<div class="empty" style="grid-column:1/-1"><div class="big">🧳</div>아직 여행이 없어요.<br>아래 <b>＋ 새 여행</b>을 눌러 첫 여행을 계획하거나,<br>내보내 둔 파일이 있다면 위의 <b>📥 JSON 가져오기</b>로 불러오세요.</div>`;return;
   }
   const list=[...S.trips].sort((a,b)=>b.start.localeCompare(a.start));
   g.innerHTML=list.map(t=>{
@@ -313,9 +315,12 @@ $('#newTripBtn').onclick=()=>tripForm();
 $('#homeMenuBtn').onclick=()=>menu('메뉴',[
   ['☁️','GitHub 저장 설정',()=>GH.settings()],
   ['🔄','지금 GitHub와 동기화',()=>GH.enabled()?GH.sync(true):GH.settings()],
-  ['📥','여행 가져오기 (JSON 파일)',()=>$('#importFile').click()],
-  ['📤','전체 백업 내보내기',()=>download(`여행플래너_백업_${fmtD(new Date())}.json`,{app:'trip-planner',v:1,trips:S.trips})],
+  ['📥','JSON 파일 가져오기',()=>$('#importFile').click()],
+  ['📤','전체 내보내기 (JSON)',()=>exportAll()],
 ]);
+const exportAll=()=>download(`여행플래너_백업_${fmtD(new Date())}.json`,{app:'trip-planner',v:1,trips:S.trips});
+$('#importBtn').onclick=()=>$('#importFile').click();
+$('#exportAllBtn').onclick=()=>S.trips.length?exportAll():toast('내보낼 여행이 없어요');
 document.querySelectorAll('.sync-btn').forEach(b=>b.onclick=()=>GH.enabled()&&GH.state!=='err'?GH.sync(true):GH.settings());
 
 /* ================== 여행 생성/수정 ================== */
@@ -370,6 +375,7 @@ $('#tripMenuBtn').onclick=()=>{const t=S.trip;menu(t.title,[
   ['✏️','여행 정보 수정 (이름·날짜)',()=>tripForm(t)],
   ['📋','일정 텍스트로 복사',()=>copyText(tripText(t))],
   ['📤','이 여행 내보내기 (JSON)',()=>download(`${t.title}.json`,{app:'trip-planner',v:1,trips:[t]})],
+  ['📥','JSON 파일 가져오기',()=>$('#importFile').click()],
   ['🗑️','여행 삭제',()=>{if(confirm(`'${t.title}' 여행을 삭제할까요?`)){S.trips=S.trips.filter(x=>x!==t);S.deleted.push({id:t.id,updatedAt:Date.now()});save(null);closeTrip();toast('삭제했어요')}},'red'],
 ])};
 
@@ -792,19 +798,40 @@ function download(name,obj){
   document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},500);
   toast('파일을 저장했어요');
 }
+/* 가져오기: 이 앱에서 내보낸 파일(여행 1개 또는 전체 백업)을 불러옴. 여러 파일 동시 선택 가능 */
+function cleanTrip(t){
+  if(!t||typeof t!=='object'||!Array.isArray(t.days)||!/^\d{4}-\d{2}-\d{2}$/.test(t.start||''))return null;
+  const days=t.days.map(d=>({items:(Array.isArray(d&&d.items)?d.items:[]).filter(it=>it&&isFinite(+it.lat)&&isFinite(+it.lng))
+    .map(it=>({...it,id:it.id||uid(),name:String(it.name||'이름 없는 장소'),lat:+it.lat,lng:+it.lng,time:it.time||'',memo:it.memo||'',cat:it.cat||'sight'}))}));
+  if(!days.length)days.push({items:[]});
+  const end=/^\d{4}-\d{2}-\d{2}$/.test(t.end||'')?t.end:addDays(t.start,days.length-1);
+  return{...t,id:t.id||uid(),title:String(t.title||'가져온 여행'),dest:t.dest||'',start:t.start,end,mode:t.mode||'line',center:t.center||null,days};
+}
 $('#importFile').onchange=async e=>{
-  const f=e.target.files[0];e.target.value='';if(!f)return;
-  try{
-    const j=JSON.parse(await f.text());const list=Array.isArray(j)?j:(j.trips||[j]);
-    let n=0;list.forEach(t=>{
-      if(!t||!t.start||!Array.isArray(t.days))return;
+  const files=[...e.target.files];e.target.value='';if(!files.length)return;
+  let added=0,replaced=0,bad=0,last=null;
+  for(const f of files){
+    let list;
+    try{const j=JSON.parse(await f.text());list=Array.isArray(j)?j:(Array.isArray(j.trips)?j.trips:[j])}
+    catch(err){bad++;continue}
+    for(const raw of list){
+      let t=cleanTrip(raw);if(!t){bad++;continue}
       const ex=S.trips.findIndex(x=>x.id===t.id);
-      if(ex>=0){if(confirm(`'${t.title}' 여행이 이미 있어요. 덮어쓸까요? (취소 = 사본으로 추가)`))S.trips[ex]=t;else S.trips.push(t={...t,id:uid(),title:t.title+' (사본)'})}
-      else S.trips.push(t);
-      t.updatedAt=Date.now();S.deleted=S.deleted.filter(d=>d.id!==t.id);n++;
-    });
-    save(null);renderHome();toast(n?`${n}개 여행을 가져왔어요`:'가져올 여행이 없어요');
-  }catch(err){toast('올바른 파일이 아니에요')}
+      if(ex>=0){
+        if(confirm(`'${S.trips[ex].title}' 여행이 이미 있어요.\n[확인] 파일 내용으로 덮어쓰기\n[취소] 사본으로 따로 추가`)){
+          S.trips[ex]=t;replaced++;
+          if(S.trip&&S.trip.id===t.id)S.trip=t;
+        }else{t={...t,id:uid(),title:t.title+' (사본)'};S.trips.push(t);added++}
+      }else{S.trips.push(t);added++}
+      t.updatedAt=Date.now();S.deleted=S.deleted.filter(d=>d.id!==t.id);last=t;
+    }
+  }
+  if(!added&&!replaced){toast(bad?'이 앱에서 내보낸 JSON 파일이 아니에요':'가져올 여행이 없어요',3000);return}
+  save(null);
+  const msg=[added&&`${added}개 추가`,replaced&&`${replaced}개 덮어씀`,bad&&`${bad}개는 읽지 못함`].filter(Boolean).join(', ');
+  toast(`여행을 가져왔어요 (${msg})`,3000);
+  if(added+replaced===1&&last)openTrip(last.id);
+  else if(S.trip)closeTrip();else renderHome();
 };
 function tripText(t){
   let s=`[${t.title}] ${t.start} ~ ${t.end}\n`;
